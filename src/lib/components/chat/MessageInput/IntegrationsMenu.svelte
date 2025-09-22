@@ -31,10 +31,12 @@
 		[];
 	export let selectedFilterIds: string[] = [];
 
-	export let showWebSearchButton = false;
-	export let webSearchEnabled = false;
-	export let showImageGenerationButton = false;
-	export let imageGenerationEnabled = false;
+export let showWebSearchButton = false;
+export let webSearchEnabled = false;
+export let showReasoningButton = false;
+export let reasoningEnabled = false;
+export let showImageGenerationButton = false;
+export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 
@@ -185,6 +187,37 @@
 								</button>
 							</Tooltip>
 						{/each}
+					{/if}
+
+					{#if showReasoningButton}
+						<Tooltip content={$i18n.t('Enable structured reasoning')} placement="top-start">
+							<button
+								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+								on:click={() => {
+									reasoningEnabled = !reasoningEnabled;
+								}}
+							>
+								<div class="flex-1 truncate">
+									<div class="flex flex-1 gap-2 items-center">
+										<div class="shrink-0">
+											<Sparkles />
+										</div>
+
+										<div class=" truncate">{$i18n.t('Reasoning')}</div>
+									</div>
+								</div>
+
+								<div class=" shrink-0">
+									<Switch
+										state={reasoningEnabled}
+										on:change={async (e) => {
+											const state = e.detail;
+											await tick();
+										}}
+									/>
+								</div>
+							</button>
+						</Tooltip>
 					{/if}
 
 					{#if showWebSearchButton}

@@ -956,6 +956,35 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 request, form_data, extra_params, user
             )
 
+        if "reasoning" in features and features["reasoning"]:
+            model_capabilities = (
+                models.get(task_model_id, {})
+                .get("info", {})
+                .get("meta", {})
+                .get("capabilities", {})
+            )
+
+            if model_capabilities.get("reasoning"):
+                reasoning_payload = {}
+
+                reasoning_effort = form_data.pop("reasoning_effort", None)
+                if reasoning_effort:
+                    reasoning_payload["effort"] = reasoning_effort
+
+                if not reasoning_payload:
+                    reasoning_payload["enabled"] = True
+                else:
+                    reasoning_payload.setdefault("enabled", True)
+
+                form_data["reasoning"] = reasoning_payload
+                # Ensure reasoning traces are returned when supported
+                form_data.setdefault("include_reasoning", True)
+            else:
+                log.debug(
+                    "Reasoning feature requested but model lacks capability: %s",
+                    task_model_id,
+                )
+
         if "image_generation" in features and features["image_generation"]:
             form_data = await chat_image_generation_handler(
                 request, form_data, extra_params, user
@@ -970,6 +999,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 ),
                 form_data["messages"],
             )
+
+    # Remove leftover reasoning_effort param if it wasn't handled above
+    if "reasoning_effort" in form_data:
+        form_data.pop("reasoning_effort", None)
 
     tool_ids = form_data.pop("tool_ids", None)
     files = form_data.pop("files", None)

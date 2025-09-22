@@ -103,9 +103,10 @@
 	export let selectedToolIds = [];
 	export let selectedFilterIds = [];
 
-	export let imageGenerationEnabled = false;
-	export let webSearchEnabled = false;
-	export let codeInterpreterEnabled = false;
+export let imageGenerationEnabled = false;
+export let webSearchEnabled = false;
+export let codeInterpreterEnabled = false;
+export let reasoningEnabled = false;
 
 	let showInputVariablesModal = false;
 	let inputVariablesModalCallback = (variableValues) => {};
@@ -127,7 +128,8 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		reasoningEnabled
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -427,13 +429,21 @@
 			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.image_generation ?? true
 	);
 
-	let codeInterpreterCapableModels = [];
-	$: codeInterpreterCapableModels = (
-		atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
-	).filter(
-		(model) =>
-			$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
-	);
+let codeInterpreterCapableModels = [];
+$: codeInterpreterCapableModels = (
+	atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
+).filter(
+	(model) =>
+		$models.find((m) => m.id === model)?.info?.meta?.capabilities?.code_interpreter ?? true
+);
+
+let reasoningCapableModels = [];
+$: reasoningCapableModels = (
+	atSelectedModel?.id ? [atSelectedModel.id] : selectedModels
+).filter(
+	(model) =>
+		$models.find((m) => m.id === model)?.info?.meta?.capabilities?.reasoning ?? false
+);
 
 	let toggleFilters = [];
 	$: toggleFilters = (atSelectedModel?.id ? [atSelectedModel.id] : selectedModels)
@@ -457,12 +467,25 @@
 		$config?.features?.enable_image_generation &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
 
-	let showCodeInterpreterButton = false;
-	$: showCodeInterpreterButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			codeInterpreterCapableModels.length &&
+let showCodeInterpreterButton = false;
+$: showCodeInterpreterButton =
+	(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
+		codeInterpreterCapableModels.length &&
 		$config?.features?.enable_code_interpreter &&
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
+
+let showReasoningButton = false;
+$: showReasoningButton =
+	(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
+		reasoningCapableModels.length &&
+		reasoningCapableModels.length > 0;
+
+$: if (reasoningEnabled) {
+	const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
+	if (currentModels.length !== reasoningCapableModels.length) {
+		reasoningEnabled = false;
+	}
+}
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
@@ -1307,6 +1330,7 @@
 																webSearchEnabled = false;
 																imageGenerationEnabled = false;
 																codeInterpreterEnabled = false;
+																reasoningEnabled = false;
 															}
 														}}
 														on:paste={async (e) => {
@@ -1430,16 +1454,18 @@
 
 										<div class="flex self-center w-[1px] h-4 mx-1 bg-gray-50 dark:bg-gray-800" />
 
-										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
+										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showReasoningButton || showToolsButton || (toggleFilters && toggleFilters.length > 0)}
 											<IntegrationsMenu
 												selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
 												{toggleFilters}
 												{showWebSearchButton}
+												{showReasoningButton}
 												{showImageGenerationButton}
 												{showCodeInterpreterButton}
 												bind:selectedToolIds
 												bind:selectedFilterIds
 												bind:webSearchEnabled
+												bind:reasoningEnabled
 												bind:imageGenerationEnabled
 												bind:codeInterpreterEnabled
 												onClose={async () => {
@@ -1518,7 +1544,25 @@
 														</button>
 													</Tooltip>
 												{/if}
-											{/each}
+												{/each}
+
+											{#if reasoningEnabled}
+												<Tooltip content={$i18n.t('Reasoning')} placement="top">
+													<button
+														on:click|preventDefault={() => (reasoningEnabled = !reasoningEnabled)}
+														type="button"
+														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {reasoningEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 '}"
+													>
+														<Sparkles className="size-4" strokeWidth="1.75" />
+
+														<div class="hidden group-hover:block">
+															<XMark className="size-4" strokeWidth="1.75" />
+														</div>
+													</button>
+												</Tooltip>
+											{/if}
 
 											{#if webSearchEnabled}
 												<Tooltip content={$i18n.t('Web Search')} placement="top">

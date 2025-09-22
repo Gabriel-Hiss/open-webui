@@ -504,36 +504,50 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
 
         for idx, models in enumerate(model_lists):
             if models is not None and "error" not in models:
+                for model in models:
+                    model_id = model.get("id") or model.get("name")
+                    if not model_id:
+                        continue
 
-                merged_list.extend(
-                    [
-                        {
-                            **model,
-                            "name": model.get("name", model["id"]),
-                            "owned_by": "openai",
-                            "openai": model,
-                            "connection_type": model.get("connection_type", "external"),
-                            "urlIdx": idx,
-                        }
-                        for model in models
-                        if (model.get("id") or model.get("name"))
-                        and (
-                            "api.openai.com"
-                            not in request.app.state.config.OPENAI_API_BASE_URLS[idx]
-                            or not any(
-                                name in model["id"]
-                                for name in [
-                                    "babbage",
-                                    "dall-e",
-                                    "davinci",
-                                    "embedding",
-                                    "tts",
-                                    "whisper",
-                                ]
-                            )
+                    if (
+                        "api.openai.com"
+                        in request.app.state.config.OPENAI_API_BASE_URLS[idx]
+                        and any(
+                            name in model_id
+                            for name in [
+                                "babbage",
+                                "dall-e",
+                                "davinci",
+                                "embedding",
+                                "tts",
+                                "whisper",
+                            ]
                         )
-                    ]
-                )
+                    ):
+                        continue
+
+                    entry = {
+                        **model,
+                        "name": model.get("name", model_id),
+                        "owned_by": "openai",
+                        "openai": model,
+                        "connection_type": model.get("connection_type", "external"),
+                        "urlIdx": idx,
+                    }
+
+                    supported_parameters = model.get("supported_parameters") or []
+                    if supported_parameters:
+                        info = entry.setdefault("info", {})
+                        meta = info.setdefault("meta", {})
+                        meta.setdefault(
+                            "supported_parameters", list(supported_parameters)
+                        )
+
+                        if "reasoning" in supported_parameters:
+                            capabilities = meta.setdefault("capabilities", {})
+                            capabilities["reasoning"] = True
+
+                    merged_list.append(entry)
 
         return merged_list
 

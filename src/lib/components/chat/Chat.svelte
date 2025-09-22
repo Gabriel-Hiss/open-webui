@@ -124,9 +124,10 @@
 
 	let selectedToolIds = [];
 	let selectedFilterIds = [];
-	let imageGenerationEnabled = false;
-	let webSearchEnabled = false;
-	let codeInterpreterEnabled = false;
+let imageGenerationEnabled = false;
+let webSearchEnabled = false;
+let codeInterpreterEnabled = false;
+let reasoningEnabled = false;
 
 	let showCommands = false;
 
@@ -188,6 +189,7 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						reasoningEnabled = input.reasoningEnabled ?? false;
 					}
 				} catch (e) {}
 			}
@@ -243,6 +245,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
+		reasoningEnabled = false;
 
 		setDefaults();
 	};
@@ -288,6 +291,10 @@
 
 				if (model.info?.meta?.capabilities?.['code_interpreter']) {
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
+				}
+
+				if (model.info?.meta?.capabilities?.['reasoning']) {
+					reasoningEnabled = model.info.meta.defaultFeatureIds.includes('reasoning');
 				}
 			}
 		}
@@ -1681,6 +1688,16 @@
 			};
 
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
+		const reasoningSupported =
+			currentModels.length > 0 &&
+			currentModels.filter(
+				(model) =>
+					$models.find((m) => m.id === model)?.info?.meta?.capabilities?.reasoning ?? false
+			).length === currentModels.length;
+
+		if (reasoningSupported && reasoningEnabled) {
+			features = { ...features, reasoning: true };
+		}
 		if (
 			currentModels.filter(
 				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
@@ -2400,6 +2417,7 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									bind:reasoningEnabled
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}
