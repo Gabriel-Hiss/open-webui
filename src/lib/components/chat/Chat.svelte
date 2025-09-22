@@ -99,6 +99,11 @@
 	let controlPane;
 	let controlPaneComponent;
 
+	const getTimestamp = () =>
+		typeof performance !== 'undefined' && performance?.now
+			? performance.now()
+			: Date.now();
+
 	let messageInput;
 
 	let autoScroll = true;
@@ -1192,7 +1197,10 @@ let reasoningEnabled = false;
 				model: modelId,
 				modelName: model.name ?? model.id,
 				modelIdx: 0,
-				timestamp: Math.floor(Date.now() / 1000)
+				timestamp: Math.floor(Date.now() / 1000),
+				metrics: {
+					startedAt: getTimestamp(),
+				}
 			};
 
 			if (parentMessage) {
@@ -1284,6 +1292,18 @@ let reasoningEnabled = false;
 	const chatCompletionEventHandler = async (data, message, chatId) => {
 		const { id, done, choices, content, sources, selected_model_id, error, usage } = data;
 
+		message.metrics = message.metrics ?? {};
+		const metrics = message.metrics;
+		metrics.startedAt ??= getTimestamp();
+
+		const markFirstToken = () => {
+			if (metrics.firstTokenAt === undefined) {
+				metrics.firstTokenAt = getTimestamp();
+				const startTime = metrics.startedAt ?? metrics.firstTokenAt;
+				metrics.ttft = metrics.firstTokenAt - startTime;
+			}
+		};
+
 		if (error) {
 			await handleOpenAIError(error, message);
 		}
@@ -1295,6 +1315,7 @@ let reasoningEnabled = false;
 		if (choices) {
 			if (choices[0]?.message?.content) {
 				// Non-stream response
+				markFirstToken();
 				message.content += choices[0]?.message?.content;
 			} else {
 				// Stream response
@@ -1302,6 +1323,9 @@ let reasoningEnabled = false;
 				if (message.content == '' && value == '\n') {
 					console.log('Empty response');
 				} else {
+					if (value && value.trim().length > 0) {
+						markFirstToken();
+					}
 					message.content += value;
 
 					if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
@@ -1336,6 +1360,7 @@ let reasoningEnabled = false;
 
 		if (content) {
 			// REALTIME_CHAT_SAVE is disabled
+			markFirstToken();
 			message.content = content;
 
 			if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
@@ -1373,11 +1398,81 @@ let reasoningEnabled = false;
 
 		if (usage) {
 			message.usage = usage;
+
+			const completionTokens =
+				usage?.completion_tokens ??
+				usage?.output_tokens ??
+				usage?.total_output_tokens ??
+				usage?.tokens?.completion ??
+				usage?.tokens?.generated ??
+				null;
+			if (completionTokens !== null && completionTokens !== undefined) {
+				metrics.completionTokens = completionTokens;
+			}
+
+			const promptTokens =
+				usage?.prompt_tokens ??
+				usage?.input_tokens ??
+				usage?.total_prompt_tokens ??
+				usage?.tokens?.prompt ??
+				usage?.tokens?.input ??
+				null;
+			if (promptTokens !== null && promptTokens !== undefined) {
+				metrics.promptTokens = promptTokens;
+			}
+
+			const totalTokens =
+				usage?.total_tokens ?? usage?.tokens_total ?? usage?.tokens?.total ?? null;
+			if (totalTokens !== null && totalTokens !== undefined) {
+				metrics.totalTokens = totalTokens;
+			}
 		}
 
 		history.messages[message.id] = message;
 
 		if (done) {
+			const completedAt = getTimestamp();
+			metrics.completedAt = completedAt;
+			if (metrics.firstTokenAt === undefined) {
+				metrics.firstTokenAt = completedAt;
+			}
+			if (metrics.startedAt === undefined) {
+				metrics.startedAt = completedAt;
+			}
+
+			const ttftMs =
+				metrics.firstTokenAt !== undefined && metrics.startedAt !== undefined
+					? metrics.firstTokenAt - metrics.startedAt
+					: undefined;
+			if (ttftMs !== undefined && Number.isFinite(ttftMs)) {
+				metrics.ttft = ttftMs;
+			}
+
+			const responseDurationMs =
+				metrics.firstTokenAt !== undefined
+					? completedAt - metrics.firstTokenAt
+					: undefined;
+
+			const inferredCompletionTokens =
+				metrics.completionTokens ??
+				message.usage?.completion_tokens ??
+				message.usage?.output_tokens ??
+				message.usage?.total_output_tokens ??
+				message.usage?.tokens?.completion ??
+				null;
+
+			if (inferredCompletionTokens !== null && inferredCompletionTokens !== undefined) {
+				metrics.completionTokens = inferredCompletionTokens;
+				if (
+					responseDurationMs !== undefined &&
+					responseDurationMs > 0 &&
+					Number.isFinite(responseDurationMs)
+				) {
+					metrics.tokensPerSecond =
+						inferredCompletionTokens / (responseDurationMs / 1000);
+				}
+			}
+
 			message.done = true;
 
 			if ($settings.responseAutoCopy) {
@@ -1588,7 +1683,10 @@ let reasoningEnabled = false;
 					model: model.id,
 					modelName: model.name ?? model.id,
 					modelIdx: modelIdx ? modelIdx : _modelIdx,
-					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
+					timestamp: Math.floor(Date.now() / 1000), // Unix epoch
+					metrics: {
+						startedAt: getTimestamp()
+					}
 				};
 
 				// Add message to history and Set currentId to messageId

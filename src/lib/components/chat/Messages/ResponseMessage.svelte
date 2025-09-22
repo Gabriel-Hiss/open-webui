@@ -39,6 +39,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
+	import Bolt from '$lib/components/icons/Bolt.svelte';
 
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
@@ -54,7 +55,18 @@
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 
-	interface MessageType {
+interface MessageMetrics {
+	startedAt?: number;
+	firstTokenAt?: number;
+	completedAt?: number;
+	ttft?: number;
+	tokensPerSecond?: number;
+	completionTokens?: number;
+	promptTokens?: number;
+	totalTokens?: number;
+}
+
+interface MessageType {
 		id: string;
 		model: string;
 		content: string;
@@ -102,6 +114,7 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
+		metrics?: MessageMetrics;
 		annotation?: { type: string; rating: number };
 	}
 
@@ -114,6 +127,72 @@
 	$: if (history.messages) {
 		if (JSON.stringify(message) !== JSON.stringify(history.messages[messageId])) {
 			message = JSON.parse(JSON.stringify(history.messages[messageId]));
+		}
+	}
+
+	$: metrics = message?.metrics;
+	$: {
+		const usageData: any = message?.usage ?? {};
+		const tokensFromMetrics = metrics?.completionTokens;
+		const tokensFromUsage =
+			usageData?.completion_tokens ??
+			usageData?.output_tokens ??
+			usageData?.total_output_tokens ??
+			usageData?.tokens?.completion ??
+			null;
+		const resolvedTokens =
+			tokensFromMetrics ??
+			tokensFromUsage ??
+			usageData?.total_tokens ??
+			usageData?.tokens_total ??
+			null;
+		completionTokens =
+			typeof resolvedTokens === 'number' && Number.isFinite(resolvedTokens)
+				? resolvedTokens
+				: null;
+
+		if (metrics?.ttft !== undefined && Number.isFinite(metrics.ttft)) {
+			ttftSeconds = metrics.ttft! / 1000;
+		} else {
+			ttftSeconds = null;
+		}
+
+		let derivedTokensPerSecond = metrics?.tokensPerSecond;
+		const durationMs =
+			metrics?.completedAt !== undefined
+				? metrics.completedAt -
+					(metrics.firstTokenAt ?? metrics.startedAt ?? metrics.completedAt)
+				: null;
+		if (
+			(derivedTokensPerSecond === undefined || !Number.isFinite(derivedTokensPerSecond)) &&
+			completionTokens !== null &&
+			durationMs !== null &&
+			durationMs > 0
+		) {
+			derivedTokensPerSecond = completionTokens / (durationMs / 1000);
+		}
+		tokensPerSecond =
+			derivedTokensPerSecond !== undefined && Number.isFinite(derivedTokensPerSecond)
+				? derivedTokensPerSecond
+				: null;
+
+		tokenMetricsAvailable =
+			message?.done && (ttftSeconds !== null || tokensPerSecond !== null);
+		if (tokenMetricsAvailable) {
+			const ttftText = ttftSeconds !== null ? ttftSeconds.toFixed(2) : 'N/A';
+			const tpsText =
+				tokensPerSecond !== null ? tokensPerSecond.toFixed(2) : 'N/A';
+			const totalTokensText =
+				completionTokens !== null ? completionTokens.toString() : 'N/A';
+			tokenMetricsLabel = `${ttftText}s | ${tpsText}t/s`;
+			tokenMetricsTooltip = sanitizeResponseContent(
+				`<div>${$i18n.t('Time to first token')}: ${ttftText}s` +
+					`<br/>${$i18n.t('Tokens per second')}: ${tpsText}` +
+					`<br/>${$i18n.t('Tokens')}: ${totalTokensText}</div>`
+			);
+		} else {
+			tokenMetricsLabel = '';
+			tokenMetricsTooltip = '';
 		}
 	}
 
@@ -163,6 +242,14 @@
 	let generatingImage = false;
 
 	let showRateComment = false;
+
+	let metrics: MessageMetrics | undefined;
+	let ttftSeconds: number | null = null;
+	let tokensPerSecond: number | null = null;
+	let completionTokens: number | null = null;
+	let tokenMetricsAvailable = false;
+	let tokenMetricsTooltip = '';
+	let tokenMetricsLabel = '';
 
 	const copyToClipboard = async (text) => {
 		text = removeAllDetails(text);
@@ -1116,6 +1203,23 @@
 													/>
 												</svg>
 											{/if}
+										</button>
+									</Tooltip>
+								{/if}
+
+								{#if tokenMetricsAvailable}
+									<Tooltip
+										content={tokenMetricsTooltip}
+										placement="bottom"
+									>
+										<button
+											class="{isLastMessage || ($settings?.highContrastMode ?? false)
+												? 'visible'
+												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition flex items-center gap-1 text-xs font-medium"
+											type="button"
+										>
+											<Bolt className="w-4 h-4" />
+											<span class="whitespace-nowrap">{tokenMetricsLabel}</span>
 										</button>
 									</Tooltip>
 								{/if}
