@@ -185,11 +185,9 @@ interface MessageType {
 			const totalTokensText =
 				completionTokens !== null ? completionTokens.toString() : 'N/A';
 			tokenMetricsLabel = `${ttftText}s | ${tpsText}t/s`;
-			tokenMetricsTooltip = sanitizeResponseContent(
-				`<div>${$i18n.t('Time to first token')}: ${ttftText}s` +
-					`<br/>${$i18n.t('Tokens per second')}: ${tpsText}` +
-					`<br/>${$i18n.t('Tokens')}: ${totalTokensText}</div>`
-			);
+			tokenMetricsTooltip = `<div>${$i18n.t('Time to first token')}: ${ttftText}s` +
+				`<br/>${$i18n.t('Tokens per second')}: ${tpsText}` +
+				`<br/>${$i18n.t('Tokens')}: ${totalTokensText}</div>`;
 		} else {
 			tokenMetricsLabel = '';
 			tokenMetricsTooltip = '';
@@ -1207,23 +1205,6 @@ interface MessageType {
 									</Tooltip>
 								{/if}
 
-								{#if tokenMetricsAvailable}
-									<Tooltip
-										content={tokenMetricsTooltip}
-										placement="bottom"
-									>
-										<button
-											class="{isLastMessage || ($settings?.highContrastMode ?? false)
-												? 'visible'
-												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition flex items-center gap-1 text-xs font-medium"
-											type="button"
-										>
-											<Bolt className="w-4 h-4" />
-											<span class="whitespace-nowrap">{tokenMetricsLabel}</span>
-										</button>
-									</Tooltip>
-								{/if}
-
 								{#if message.usage}
 									<Tooltip
 										content={message.usage
@@ -1527,6 +1508,23 @@ interface MessageType {
 												</button>
 											</Tooltip>
 										{/if}
+									{/if}
+
+									{#if tokenMetricsAvailable}
+										<Tooltip
+											content={tokenMetricsTooltip}
+											placement="bottom"
+										>
+											<button
+												class="{isLastMessage || ($settings?.highContrastMode ?? false)
+													? 'visible'
+													: 'invisible group-hover:visible'} p-1.5 ml-0.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition flex items-center gap-1 text-xs font-medium"
+												type="button"
+											>
+												<Bolt className="w-4 h-4" />
+												<span class="whitespace-nowrap">{tokenMetricsLabel}</span>
+											</button>
+										</Tooltip>
 									{/if}
 
 									{#if isLastMessage}
