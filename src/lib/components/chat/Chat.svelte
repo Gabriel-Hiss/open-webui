@@ -1296,11 +1296,90 @@ let reasoningEnabled = false;
 		const metrics = message.metrics;
 		metrics.startedAt ??= getTimestamp();
 
-		const markFirstToken = () => {
-			if (metrics.firstTokenAt === undefined) {
-				metrics.firstTokenAt = getTimestamp();
-				const startTime = metrics.startedAt ?? metrics.firstTokenAt;
-				metrics.ttft = metrics.firstTokenAt - startTime;
+		const resolveNonNegativeNumber = (value: unknown): number | undefined => {
+			if (typeof value === 'string') {
+				if (value.trim() === '') {
+					return undefined;
+				}
+				const parsed = Number(value);
+				if (!Number.isFinite(parsed) || parsed < 0) {
+					return undefined;
+				}
+				return parsed;
+			}
+			if (typeof value === 'number') {
+				if (!Number.isFinite(value) || value < 0) {
+					return undefined;
+				}
+				return value;
+			}
+			return undefined;
+		};
+
+		const pickFirstNonNegative = (...candidates: unknown[]): number | undefined => {
+			for (const candidate of candidates) {
+				const value = resolveNonNegativeNumber(candidate);
+				if (value !== undefined) {
+					return value;
+				}
+			}
+			return undefined;
+		};
+
+		const pickOutputTokens = (usageData: any): number | undefined => {
+			if (!usageData) {
+				return undefined;
+			}
+
+			const priorityKeys = ['output_tokens', 'completion_tokens', 'total_output_tokens'] as const;
+			for (const key of priorityKeys) {
+				const value = resolveNonNegativeNumber(usageData?.[key]);
+				if (value !== undefined) {
+					return value;
+				}
+			}
+
+			const nestedTokens = usageData?.tokens;
+			if (nestedTokens && typeof nestedTokens === 'object') {
+				const nestedPriorityKeys = ['output', 'completion', 'generated'] as const;
+				for (const key of nestedPriorityKeys) {
+					const value = resolveNonNegativeNumber(nestedTokens?.[key]);
+					if (value !== undefined) {
+						return value;
+					}
+				}
+			}
+
+			return undefined;
+		};
+
+		const markFirstToken = ({ delta, text }: { delta?: any; text?: string } = {}) => {
+			if (metrics.firstTokenAt !== undefined) {
+				return;
+			}
+
+			const hasText = typeof text === 'string' && text.trim().length > 0;
+			const deltaReasoning = delta?.reasoning;
+			const reasoningEntries = Array.isArray(deltaReasoning) ? deltaReasoning : deltaReasoning ? [deltaReasoning] : [];
+			const hasReasoningText = reasoningEntries.some((entry) => {
+				const reasoningText = typeof entry?.text === 'string' ? entry.text : typeof entry?.content === 'string' ? entry.content : '';
+				return reasoningText.trim().length > 0;
+			});
+			const shouldMeasureReasoning = Boolean(reasoningEnabled);
+			const usefulText = hasText || (shouldMeasureReasoning && hasReasoningText);
+			const isToolDelta = Array.isArray(delta?.tool_calls) || delta?.function_call !== undefined || delta?.tool_call_id !== undefined;
+			const isRoleOnly = typeof delta?.role === 'string' && !usefulText;
+
+			if (!usefulText || isToolDelta || isRoleOnly) {
+				return;
+			}
+
+			const firstTokenTimestamp = getTimestamp();
+			metrics.firstTokenAt = firstTokenTimestamp;
+			const startTime = metrics.startedAt ?? firstTokenTimestamp;
+			const ttft = firstTokenTimestamp - startTime;
+			if (Number.isFinite(ttft) && ttft >= 0) {
+				metrics.ttft = ttft;
 			}
 		};
 
@@ -1313,19 +1392,22 @@ let reasoningEnabled = false;
 		}
 
 		if (choices) {
-			if (choices[0]?.message?.content) {
+			const choice = choices[0];
+			if (choice?.message?.content !== undefined && choice?.message?.content !== null) {
 				// Non-stream response
-				markFirstToken();
-				message.content += choices[0]?.message?.content;
+				const messageContent = typeof choice?.message?.content === 'string' ? choice?.message?.content : '';
+				if (messageContent.trim().length > 0) {
+					markFirstToken({ text: messageContent });
+				}
+				message.content += messageContent;
 			} else {
 				// Stream response
-				let value = choices[0]?.delta?.content ?? '';
+				const delta: any = choice?.delta ?? {};
+				let value = typeof delta?.content === 'string' ? delta.content : '';
 				if (message.content == '' && value == '\n') {
 					console.log('Empty response');
 				} else {
-					if (value && value.trim().length > 0) {
-						markFirstToken();
-					}
+					markFirstToken({ delta, text: value });
 					message.content += value;
 
 					if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
@@ -1360,7 +1442,9 @@ let reasoningEnabled = false;
 
 		if (content) {
 			// REALTIME_CHAT_SAVE is disabled
-			markFirstToken();
+			if (typeof content === 'string' && content.trim().length > 0) {
+				markFirstToken({ text: content });
+			}
 			message.content = content;
 
 			if (navigator.vibrate && ($settings?.hapticFeedback ?? false)) {
@@ -1399,31 +1483,29 @@ let reasoningEnabled = false;
 		if (usage) {
 			message.usage = usage;
 
-			const completionTokens =
-				usage?.completion_tokens ??
-				usage?.output_tokens ??
-				usage?.total_output_tokens ??
-				usage?.tokens?.completion ??
-				usage?.tokens?.generated ??
-				null;
-			if (completionTokens !== null && completionTokens !== undefined) {
-				metrics.completionTokens = completionTokens;
+			const outputTokens = pickOutputTokens(usage);
+			if (outputTokens !== undefined) {
+				metrics.outputTokens = outputTokens;
+				metrics.completionTokens = outputTokens;
 			}
 
-			const promptTokens =
-				usage?.prompt_tokens ??
-				usage?.input_tokens ??
-				usage?.total_prompt_tokens ??
-				usage?.tokens?.prompt ??
-				usage?.tokens?.input ??
-				null;
-			if (promptTokens !== null && promptTokens !== undefined) {
+			const promptTokens = pickFirstNonNegative(
+				usage?.prompt_tokens,
+				usage?.input_tokens,
+				usage?.total_prompt_tokens,
+				usage?.tokens?.prompt,
+				usage?.tokens?.input
+			);
+			if (promptTokens !== undefined) {
 				metrics.promptTokens = promptTokens;
 			}
 
-			const totalTokens =
-				usage?.total_tokens ?? usage?.tokens_total ?? usage?.tokens?.total ?? null;
-			if (totalTokens !== null && totalTokens !== undefined) {
+			const totalTokens = pickFirstNonNegative(
+				usage?.total_tokens,
+				usage?.tokens_total,
+				usage?.tokens?.total
+			);
+			if (totalTokens !== undefined) {
 				metrics.totalTokens = totalTokens;
 			}
 		}
@@ -1440,37 +1522,65 @@ let reasoningEnabled = false;
 				metrics.startedAt = completedAt;
 			}
 
-			const ttftMs =
-				metrics.firstTokenAt !== undefined && metrics.startedAt !== undefined
-					? metrics.firstTokenAt - metrics.startedAt
-					: undefined;
-			if (ttftMs !== undefined && Number.isFinite(ttftMs)) {
+			const firstTokenAt = metrics.firstTokenAt;
+			const startedAt = metrics.startedAt;
+			const ttftMs = firstTokenAt !== undefined && startedAt !== undefined ? firstTokenAt - startedAt : undefined;
+			if (ttftMs !== undefined && Number.isFinite(ttftMs) && ttftMs >= 0) {
 				metrics.ttft = ttftMs;
+			} else {
+				delete metrics.ttft;
 			}
 
-			const responseDurationMs =
-				metrics.firstTokenAt !== undefined
-					? completedAt - metrics.firstTokenAt
-					: undefined;
+			let outputTokens = resolveNonNegativeNumber(metrics.outputTokens);
+			if (outputTokens === undefined) {
+				outputTokens = pickOutputTokens(message.usage);
+			}
+			if (outputTokens !== undefined) {
+				metrics.outputTokens = outputTokens;
+				metrics.completionTokens = outputTokens;
+			} else {
+				delete metrics.outputTokens;
+				delete metrics.completionTokens;
+			}
 
-			const inferredCompletionTokens =
-				metrics.completionTokens ??
-				message.usage?.completion_tokens ??
-				message.usage?.output_tokens ??
-				message.usage?.total_output_tokens ??
-				message.usage?.tokens?.completion ??
-				null;
+			const generationWindowMs = firstTokenAt !== undefined ? completedAt - firstTokenAt : undefined;
+			const validGenerationWindow = generationWindowMs !== undefined && Number.isFinite(generationWindowMs) && generationWindowMs > 0;
 
-			if (inferredCompletionTokens !== null && inferredCompletionTokens !== undefined) {
-				metrics.completionTokens = inferredCompletionTokens;
-				if (
-					responseDurationMs !== undefined &&
-					responseDurationMs > 0 &&
-					Number.isFinite(responseDurationMs)
-				) {
-					metrics.tokensPerSecond =
-						inferredCompletionTokens / (responseDurationMs / 1000);
+			if (validGenerationWindow && outputTokens !== undefined && outputTokens > 0 && firstTokenAt !== undefined && completedAt !== firstTokenAt) {
+				const tpsGeneration = outputTokens / (generationWindowMs / 1000);
+				if (Number.isFinite(tpsGeneration) && tpsGeneration > 0) {
+					metrics.tpsGeneration = tpsGeneration;
+					metrics.tokensPerSecond = tpsGeneration;
+				} else {
+					delete metrics.tpsGeneration;
+					delete metrics.tokensPerSecond;
 				}
+			} else {
+				delete metrics.tpsGeneration;
+				delete metrics.tokensPerSecond;
+			}
+
+			const e2eWindowMs = startedAt !== undefined ? completedAt - startedAt : undefined;
+			const validE2EWindow = e2eWindowMs !== undefined && Number.isFinite(e2eWindowMs) && e2eWindowMs > 0 && startedAt !== undefined && completedAt !== startedAt;
+			if (validE2EWindow && outputTokens !== undefined) {
+				const promptTokens = resolveNonNegativeNumber(metrics.promptTokens);
+				if (promptTokens !== undefined) {
+					const totalTokenCount = promptTokens + outputTokens;
+					if (totalTokenCount > 0) {
+						const tpsE2E = totalTokenCount / (e2eWindowMs / 1000);
+						if (Number.isFinite(tpsE2E) && tpsE2E > 0) {
+							metrics.tpsE2E = tpsE2E;
+						} else {
+							delete metrics.tpsE2E;
+						}
+					} else {
+						delete metrics.tpsE2E;
+					}
+				} else {
+					delete metrics.tpsE2E;
+				}
+			} else {
+				delete metrics.tpsE2E;
 			}
 
 			message.done = true;
