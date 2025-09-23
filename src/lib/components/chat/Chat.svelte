@@ -133,6 +133,7 @@ let imageGenerationEnabled = false;
 let webSearchEnabled = false;
 let codeInterpreterEnabled = false;
 let reasoningEnabled = false;
+let reasoningEffort: string | null = 'medium';
 
 	let showCommands = false;
 
@@ -195,6 +196,7 @@ let reasoningEnabled = false;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
 						reasoningEnabled = input.reasoningEnabled ?? false;
+						reasoningEffort = input.reasoningEffort ?? null;
 					}
 				} catch (e) {}
 			}
@@ -626,13 +628,13 @@ let reasoningEnabled = false;
 			console.log('Processing web file with URL:', fileData.url);
 
 			// Configure fetch options with proper headers
-			const fetchOptions = {
-				headers: {
-					Authorization: fileData.headers.Authorization,
-					Accept: '*/*'
-				},
-				method: 'GET'
-			};
+				const fetchOptions = {
+					headers: {
+						Authorization: fileData.headers.Authorization,
+						Accept: '*/*'
+					},
+					method: 'GET'
+				};
 
 			// Attempt to fetch the file
 			console.log('Fetching file content from Google Drive...');
@@ -1923,7 +1925,7 @@ let reasoningEnabled = false;
 		return features;
 	};
 
-	const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId) => {
+const sendMessageSocket = async (model, _messages, _history, responseMessageId, _chatId) => {
 		const responseMessage = _history.messages[responseMessageId];
 		const userMessage = _history.messages[responseMessage.parentId];
 
@@ -2046,6 +2048,8 @@ let reasoningEnabled = false;
 								)
 							: undefined
 				},
+
+				...(reasoningEnabled ? { reasoning_effort: reasoningEffort ?? 'medium' } : {}),
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 
@@ -2626,6 +2630,7 @@ let reasoningEnabled = false;
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
 									bind:reasoningEnabled
+									bind:reasoningEffort
 									bind:atSelectedModel
 									bind:showCommands
 									toolServers={$toolServers}

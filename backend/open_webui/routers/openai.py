@@ -498,6 +498,13 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
             return response
         return None
 
+    # Identify which configured URLs are OpenRouter
+    openrouter_url_idxs = set(
+        idx
+        for idx, base_url in enumerate(request.app.state.config.OPENAI_API_BASE_URLS)
+                if isinstance(base_url, str) and "openrouter.ai" in base_url.strip().lower()
+    )
+
     def merge_models_lists(model_lists):
         log.debug(f"merge_models_lists {model_lists}")
         merged_list = []
@@ -546,6 +553,9 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
                         if "reasoning" in supported_parameters:
                             capabilities = meta.setdefault("capabilities", {})
                             capabilities["reasoning"] = True
+                            # Mark reasoning_effort support for OpenRouter connections
+                            if idx in openrouter_url_idxs:
+                                capabilities["reasoning_effort"] = True
 
                     merged_list.append(entry)
 

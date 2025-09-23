@@ -4,7 +4,7 @@
 	import { fly } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { config, user, tools as _tools, mobile, settings, toolServers } from '$lib/stores';
+	import { config, user, tools as _tools, mobile, settings, toolServers, models } from '$lib/stores';
 
 	import { getTools } from '$lib/apis/tools';
 
@@ -14,6 +14,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
+	import Brain from '$lib/components/icons/Brain.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
@@ -35,6 +36,12 @@ export let showWebSearchButton = false;
 export let webSearchEnabled = false;
 export let showReasoningButton = false;
 export let reasoningEnabled = false;
+// Reasoning effort support & selection
+export let reasoningEffort: string | null = 'medium'; // default to medium
+let showReasoningEffort = false;
+let allSelectedModelsSupportReasoningEffort = false;
+let showEffortMenu = false;
+let hideEffortMenuTimer: ReturnType<typeof setTimeout> | null = null;
 export let showImageGenerationButton = false;
 export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
@@ -87,6 +94,26 @@ export let imageGenerationEnabled = false;
 
 		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
 	};
+
+    // Compute whether to show Reasoning Effort selector
+    $: {
+        const currentModelIds = selectedModels;
+        // Determine support from model capabilities when available
+        const supportFlags = currentModelIds.map((id) => {
+            const m = $models.find((mm) => mm.id === id);
+            const caps = m?.info?.meta?.capabilities ?? {};
+            // capability key added server-side for OpenRouter when supported
+            return Boolean(caps.reasoning && (caps.reasoning_effort ?? false));
+        });
+        allSelectedModelsSupportReasoningEffort = supportFlags.length > 0 && supportFlags.every(Boolean);
+        showReasoningEffort = showReasoningButton && allSelectedModelsSupportReasoningEffort;
+        // Reset to none if capability disappears; otherwise ensure default medium selected
+        if (!showReasoningEffort) {
+            reasoningEffort = null;
+        } else if (reasoningEffort == null) {
+            reasoningEffort = 'medium';
+        }
+    }
 </script>
 
 <Dropdown
@@ -102,7 +129,7 @@ export let imageGenerationEnabled = false;
 	</Tooltip>
 	<div slot="content">
 		<DropdownMenu.Content
-			class="w-full max-w-70 rounded-2xl px-1 py-1  border border-gray-100  dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin"
+						class="w-full max-w-70 rounded-2xl px-1 py-1  border border-gray-100  dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-visible md:overflow-visible scrollbar-thin"
 			sideOffset={4}
 			alignOffset={-6}
 			side="bottom"
@@ -113,10 +140,10 @@ export let imageGenerationEnabled = false;
 				<div in:fly={{ x: -20, duration: 150 }}>
 					{#if tools}
 						{#if Object.keys(tools).length > 0}
-							<button
-								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-								on:click={() => {
-									tab = 'tools';
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									on:click={() => {
+										tab = 'tools';
 								}}
 							>
 								<Wrench />
@@ -190,34 +217,100 @@ export let imageGenerationEnabled = false;
 					{/if}
 
 					{#if showReasoningButton}
-						<Tooltip content={$i18n.t('Enable structured reasoning')} placement="top-start">
-							<button
-								class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-								on:click={() => {
-									reasoningEnabled = !reasoningEnabled;
-								}}
-							>
-								<div class="flex-1 truncate">
-									<div class="flex flex-1 gap-2 items-center">
-										<div class="shrink-0">
-											<Sparkles />
+						<div class="group/rsn">
+							<Tooltip content={$i18n.t('Enable structured reasoning')} placement="top-start">
+								<button
+									class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+									on:click={() => {
+										reasoningEnabled = !reasoningEnabled;
+										if (reasoningEnabled && reasoningEffort == null) {
+											reasoningEffort = 'medium';
+										}
+									}}
+								>
+									<div class="flex-1 truncate">
+										<div class="flex flex-1 gap-2 items-center">
+											<div class="shrink-0">
+												<Sparkles />
+											</div>
+
+											<div class=" truncate">{$i18n.t('Reasoning')}</div>
 										</div>
-
-										<div class=" truncate">{$i18n.t('Reasoning')}</div>
 									</div>
-								</div>
 
-								<div class=" shrink-0">
-									<Switch
-										state={reasoningEnabled}
-										on:change={async (e) => {
-											const state = e.detail;
-											await tick();
-										}}
-									/>
-								</div>
-							</button>
-						</Tooltip>
+									<div class=" shrink-0">
+										<Switch
+											state={reasoningEnabled}
+											on:change={async (e) => {
+												const state = e.detail;
+												await tick();
+											}}
+										/>
+									</div>
+								</button>
+							</Tooltip>
+
+                            {#if showReasoningEffort}
+                                <div class="relative">
+                            <button
+                                class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                                on:mouseenter={() => { if (hideEffortMenuTimer) clearTimeout(hideEffortMenuTimer); showEffortMenu = true; }}
+                                                                on:mouseleave={() => { hideEffortMenuTimer = setTimeout(() => { showEffortMenu = false; hideEffortMenuTimer = null; }, 150); }}
+                                aria-haspopup="menu"
+                                type="button"
+                            >
+                                        <div class="flex-1 truncate">
+                                            <div class="flex flex-1 gap-2 items-center">
+                                        <div class="shrink-0">
+                                            <Brain level={reasoningEffort ?? 'medium'} />
+                                        </div>
+                                                <div class="truncate">{$i18n.t('Effort')}</div>
+                                            </div>
+                                        </div>
+                                        <div class="shrink-0 text-gray-400">▶</div>
+                                    </button>
+
+                                    {#if showEffortMenu}
+                                        <div
+                                            class="absolute left-full top-0 ml-0 w-44 rounded-xl px-2 py-2 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-lg z-[60]"
+                                            on:mouseenter={() => { if (hideEffortMenuTimer) clearTimeout(hideEffortMenuTimer); showEffortMenu = true; }}
+                                            on:mouseleave={() => { hideEffortMenuTimer = setTimeout(() => (showEffortMenu = false), 150); }}
+                                        >
+                                            <div class="text-xs text-gray-600 dark:text-gray-400 px-1 pb-1 flex items-center gap-1">
+                                                <Brain className="size-3.5" strokeWidth="1.5" level={reasoningEffort ?? 'medium'} />
+                                                {$i18n.t('Reasoning Effort')}
+                                            </div>
+                                            <div class="flex flex-col gap-1">
+                                                <button
+                                                    class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition w-full text-left {reasoningEffort === 'low' ? 'bg-gray-900 text-white dark:bg-white dark:text-black' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}"
+                                                    on:click|preventDefault={() => (reasoningEffort = 'low')}
+                                                    type="button"
+                                                >
+                                                    <Brain className="size-3.5" strokeWidth="1.75" level="low" />
+                                                    <span>{$i18n.t('Low')}</span>
+                                                </button>
+                                                <button
+                                                    class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition w-full text-left {reasoningEffort === 'medium' ? 'bg-gray-900 text-white dark:bg-white dark:text-black' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}"
+                                                    on:click|preventDefault={() => (reasoningEffort = 'medium')}
+                                                    type="button"
+                                                >
+                                                    <Brain className="size-3.5" strokeWidth="1.75" level="medium" />
+                                                    <span>{$i18n.t('Medium')}</span>
+                                                </button>
+                                                <button
+                                                    class="flex items-center gap-2 px-2 py-1 rounded-lg text-xs transition w-full text-left {reasoningEffort === 'high' ? 'bg-gray-900 text-white dark:bg-white dark:text-black' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}"
+                                                    on:click|preventDefault={() => (reasoningEffort = 'high')}
+                                                    type="button"
+                                                >
+                                                    <Brain className="size-3.5" strokeWidth="1.75" level="high" />
+                                                    <span>{$i18n.t('High')}</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    {/if}
+                                </div>
+                            {/if}
+                        </div>
 					{/if}
 
 					{#if showWebSearchButton}

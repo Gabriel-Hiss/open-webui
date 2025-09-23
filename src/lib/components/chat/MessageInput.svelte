@@ -66,6 +66,7 @@
 	import Wrench from '../icons/Wrench.svelte';
 	import CommandLine from '../icons/CommandLine.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+    import Brain from '../icons/Brain.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import Voice from '../icons/Voice.svelte';
@@ -107,6 +108,7 @@ export let imageGenerationEnabled = false;
 export let webSearchEnabled = false;
 export let codeInterpreterEnabled = false;
 export let reasoningEnabled = false;
+export let reasoningEffort: string | null = 'medium';
 
 	let showInputVariablesModal = false;
 	let inputVariablesModalCallback = (variableValues) => {};
@@ -129,7 +131,8 @@ export let reasoningEnabled = false;
 		imageGenerationEnabled,
 		webSearchEnabled,
 		codeInterpreterEnabled,
-		reasoningEnabled
+		reasoningEnabled,
+		reasoningEffort
 	});
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
@@ -1466,6 +1469,7 @@ $: if (reasoningEnabled) {
 												bind:selectedFilterIds
 												bind:webSearchEnabled
 												bind:reasoningEnabled
+												bind:reasoningEffort
 												bind:imageGenerationEnabled
 												bind:codeInterpreterEnabled
 												onClose={async () => {
@@ -1555,7 +1559,7 @@ $: if (reasoningEnabled) {
 															? ' text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
 															: 'bg-transparent text-gray-600 dark:text-gray-300 '}"
 													>
-														<Sparkles className="size-4" strokeWidth="1.75" />
+														<Brain className="size-4" strokeWidth="1.75" level={reasoningEffort ?? 'medium'} />
 
 														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
