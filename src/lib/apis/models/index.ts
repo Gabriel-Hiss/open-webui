@@ -291,3 +291,40 @@ export const reindexOpenRouter = async (token: string) => {
 
     return res;
 };
+
+export const beautifyOpenRouter = async (
+    token: string,
+    body: {
+        icon_theme?: string;
+        prefix?: string;
+        allow_web_search?: boolean;
+        allow_usage_logger?: boolean;
+    } = {}
+) => {
+    let error = null;
+
+    const res = await fetch(`${WEBUI_API_BASE_URL}/models/beautify/openrouter`, {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+    })
+        .then(async (res) => {
+            if (!res.ok) throw await res.json();
+            return res.json();
+        })
+        .catch((err) => {
+            error = err;
+            console.error(err);
+            return null;
+        });
+
+    if (error) {
+        throw error;
+    }
+
+    return res;
+};
