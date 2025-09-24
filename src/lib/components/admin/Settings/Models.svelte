@@ -37,6 +37,8 @@
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import Eye from '$lib/components/icons/Eye.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import Refresh from '$lib/components/icons/Refresh.svelte';
+	import { reindexOpenRouter } from '$lib/apis/models';
 
 	let shiftKey = false;
 
@@ -53,6 +55,7 @@
 
 	let showConfigModal = false;
 	let showManageModal = false;
+	let reindexing = false;
 
 	$: if (models) {
 		filteredModels = models
@@ -522,6 +525,37 @@
 									clip-rule="evenodd"
 								/>
 							</svg>
+						</div>
+					</button>
+
+					<button
+						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 transition"
+						on:click={async () => {
+							if (reindexing) return;
+							reindexing = true;
+							const res = await reindexOpenRouter(localStorage.token).catch((error) => {
+								toast.error(`${error}`);
+								return null;
+							});
+
+							reindexing = false;
+							if (res?.status) {
+								toast.success($i18n.t('Reindexed OpenRouter data'));
+								await init();
+							}
+						}}
+						disabled={reindexing}
+					>
+						<div class=" self-center mr-2 font-medium line-clamp-1">
+							{$i18n.t('Reindex OpenRouter Data')}
+						</div>
+
+						<div class=" self-center">
+							{#if reindexing}
+								<Spinner className="w-3.5 h-3.5" />
+							{:else}
+								<Refresh className="w-3.5 h-3.5" />
+							{/if}
 						</div>
 					</button>
 

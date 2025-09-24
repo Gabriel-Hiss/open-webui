@@ -19,6 +19,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access, has_permission
 from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL, STATIC_DIR
+from open_webui.utils.models import get_all_models as utils_get_all_models
+from aiocache import caches
 
 router = APIRouter()
 
@@ -265,3 +267,31 @@ async def delete_model_by_id(id: str, user=Depends(get_verified_user)):
 async def delete_all_models(user=Depends(get_admin_user)):
     result = Models.delete_all_models()
     return result
+
+
+############################
+# Reindex OpenRouter Data
+############################
+
+
+@router.post("/reindex/openrouter")
+async def reindex_openrouter(request: Request, user=Depends(get_admin_user)):
+    """
+    Refresh OpenRouter-backed model metadata and rebuild cached model lists.
+    - Clears the OpenAI models cache keys
+    - Rebuilds the in-memory BASE_MODELS/MODELS using the normal aggregation path
+    """
+    try:
+        # Invalidate cached OpenAI model list keys (best-effort)
+        try:
+            cache = caches.get("default")
+            await cache.delete("openai_all_models")
+            await cache.delete(f"openai_all_models_{user.id}")
+        except Exception:
+            pass
+
+        # Rebuild aggregated models (forces refetch of base models)
+        models = await utils_get_all_models(request, refresh=True, user=user)
+        return {"status": True, "count": len(models)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
