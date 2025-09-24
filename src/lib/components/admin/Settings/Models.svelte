@@ -38,7 +38,8 @@
 	import Eye from '$lib/components/icons/Eye.svelte';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import Refresh from '$lib/components/icons/Refresh.svelte';
-	import { reindexOpenRouter } from '$lib/apis/models';
+	import Sparkles from '$lib/components/icons/Sparkles.svelte';
+	import { reindexOpenRouter, beautifyOpenRouter } from '$lib/apis/models';
 
 	let shiftKey = false;
 
@@ -56,6 +57,7 @@
 	let showConfigModal = false;
 	let showManageModal = false;
 	let reindexing = false;
+	let beautifying = false;
 
 	$: if (models) {
 		filteredModels = models
@@ -555,6 +557,36 @@
 								<Spinner className="w-3.5 h-3.5" />
 							{:else}
 								<Refresh className="w-3.5 h-3.5" />
+							{/if}
+						</div>
+					</button>
+
+					<button
+						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200 transition"
+						on:click={async () => {
+							if (beautifying) return;
+							beautifying = true;
+							const res = await beautifyOpenRouter(localStorage.token, {}).catch((error) => {
+								toast.error(`${error}`);
+								return null;
+							});
+							beautifying = false;
+							if (res?.status) {
+								toast.success($i18n.t('Beautified OpenRouter models'));
+								await init();
+							}
+						}}
+						disabled={beautifying}
+					>
+						<div class=" self-center mr-2 font-medium line-clamp-1">
+							{$i18n.t('Beautify')}
+						</div>
+
+						<div class=" self-center">
+							{#if beautifying}
+								<Spinner className="w-3.5 h-3.5" />
+							{:else}
+								<Sparkles className="w-3.5 h-3.5" />
 							{/if}
 						</div>
 					</button>

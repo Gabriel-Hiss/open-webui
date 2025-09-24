@@ -95,19 +95,19 @@ export let imageGenerationEnabled = false;
 		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
 	};
 
+    // Local visibility derived from selectedModels to avoid stale parent gating
+    $: showReasoningLocal = (selectedModels ?? []).some((id) => {
+        const m = $models.find((mm) => mm.id === id);
+        return Boolean(m?.info?.meta?.capabilities?.reasoning ?? false);
+    });
+
     // Compute whether to show Reasoning Effort selector
     $: {
         const currentModelIds = selectedModels;
-        // Determine support from model capabilities when available
-        const supportFlags = currentModelIds.map((id) => {
-            const m = $models.find((mm) => mm.id === id);
-            const caps = m?.info?.meta?.capabilities ?? {};
-            // capability key added server-side for OpenRouter when supported
-            return Boolean(caps.reasoning && (caps.reasoning_effort ?? false));
-        });
-        allSelectedModelsSupportReasoningEffort = supportFlags.length > 0 && supportFlags.every(Boolean);
-        showReasoningEffort = showReasoningButton && allSelectedModelsSupportReasoningEffort;
-        // Reset to none if capability disappears; otherwise ensure default medium selected
+        // Show effort whenever at least one current model supports reasoning
+        const anyReasoning = showReasoningLocal;
+        allSelectedModelsSupportReasoningEffort = anyReasoning;
+        showReasoningEffort = (showReasoningButton ?? true) && anyReasoning;
         if (!showReasoningEffort) {
             reasoningEffort = null;
         } else if (reasoningEffort == null) {
@@ -216,7 +216,7 @@ export let imageGenerationEnabled = false;
 						{/each}
 					{/if}
 
-					{#if showReasoningButton}
+					{#if showReasoningLocal}
 						<div class="group/rsn">
 							<Tooltip content={$i18n.t('Enable structured reasoning')} placement="top-start">
 								<button
@@ -273,6 +273,8 @@ export let imageGenerationEnabled = false;
                                     {#if showEffortMenu}
                                         <div
                                             class="absolute left-full top-0 ml-0 w-44 rounded-xl px-2 py-2 border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-850 shadow-lg z-[60]"
+                                            role="menu"
+                                            aria-label={$i18n.t('Reasoning Effort')}
                                             on:mouseenter={() => { if (hideEffortMenuTimer) clearTimeout(hideEffortMenuTimer); showEffortMenu = true; }}
                                             on:mouseleave={() => { hideEffortMenuTimer = setTimeout(() => (showEffortMenu = false), 150); }}
                                         >

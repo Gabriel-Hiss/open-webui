@@ -478,10 +478,13 @@ $: showCodeInterpreterButton =
 		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
 let showReasoningButton = false;
-$: showReasoningButton =
-	(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-		reasoningCapableModels.length &&
-		reasoningCapableModels.length > 0;
+$: {
+    const currentIds = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
+    showReasoningButton = currentIds.some((id) => {
+        const m = $models.find((mm) => mm.id === id);
+        return Boolean(m?.info?.meta?.capabilities?.reasoning ?? false);
+    });
+}
 
 $: if (reasoningEnabled) {
 	const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
