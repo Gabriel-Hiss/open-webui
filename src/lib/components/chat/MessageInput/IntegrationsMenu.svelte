@@ -6,8 +6,10 @@
 
 	import { config, user, tools as _tools, mobile, settings, toolServers, models } from '$lib/stores';
 
+	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
 	import { getTools } from '$lib/apis/tools';
 
+	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -47,6 +49,7 @@ export let imageGenerationEnabled = false;
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 
+	export let onShowValves: Function;
 	export let onClose: Function;
 
 	let show = false;
@@ -73,7 +76,8 @@ export let imageGenerationEnabled = false;
 				a[tool.id] = {
 					name: tool.name,
 					description: tool.meta.description,
-					enabled: selectedToolIds.includes(tool.id)
+					enabled: selectedToolIds.includes(tool.id),
+					...tool
 				};
 				return a;
 			}, {});
@@ -201,6 +205,27 @@ export let imageGenerationEnabled = false;
 											<div class=" truncate">{filter?.name}</div>
 										</div>
 									</div>
+
+									{#if filter?.has_user_valves}
+										<div class=" shrink-0">
+											<Tooltip content={$i18n.t('Valves')}>
+												<button
+													class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+													type="button"
+													on:click={(e) => {
+														e.stopPropagation();
+														e.preventDefault();
+														onShowValves({
+															type: 'function',
+															id: filter.id
+														});
+													}}
+												>
+													<Knobs />
+												</button>
+											</Tooltip>
+										</div>
+									{/if}
 
 									<div class=" shrink-0">
 										<Switch
@@ -432,11 +457,25 @@ export let imageGenerationEnabled = false;
 
 					{#each Object.keys(tools) as toolId}
 						<button
-							class="flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
-							on:click={() => {
-								tools[toolId].enabled = !tools[toolId].enabled;
+							class="relative flex w-full justify-between gap-2 items-center px-3 py-1.5 text-sm cursor-pointer rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50"
+							on:click={(e) => {
+								if (!(tools[toolId]?.authenticated ?? true)) {
+									e.preventDefault();
+
+									let parts = toolId.split(':');
+									let serverId = parts?.at(-1) ?? toolId;
+
+									const authUrl = getOAuthClientAuthorizationUrl(serverId, 'mcp');
+									window.open(authUrl, '_blank', 'noopener');
+								} else {
+									tools[toolId].enabled = !tools[toolId].enabled;
+								}
 							}}
 						>
+							{#if !(tools[toolId]?.authenticated ?? true)}
+								<!-- make it slighly darker and not clickable -->
+								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
+							{/if}
 							<div class="flex-1 truncate">
 								<div class="flex flex-1 gap-2 items-center">
 									<Tooltip content={tools[toolId]?.name ?? ''} placement="top">
@@ -449,6 +488,27 @@ export let imageGenerationEnabled = false;
 									</Tooltip>
 								</div>
 							</div>
+
+							{#if tools[toolId]?.has_user_valves}
+								<div class=" shrink-0">
+									<Tooltip content={$i18n.t('Valves')}>
+										<button
+											class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
+											type="button"
+											on:click={(e) => {
+												e.stopPropagation();
+												e.preventDefault();
+												onShowValves({
+													type: 'tool',
+													id: toolId
+												});
+											}}
+										>
+											<Knobs />
+										</button>
+									</Tooltip>
+								</div>
+							{/if}
 
 							<div class=" shrink-0">
 								<Switch

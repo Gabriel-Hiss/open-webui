@@ -38,7 +38,8 @@
 		toolServers,
 		functions,
 		selectedFolder,
-		pinnedChats
+		pinnedChats,
+		showEmbeds
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
@@ -376,6 +377,8 @@ let reasoningEffort: string | null = 'medium';
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
 					message.files = data.files;
+				} else if (type === 'chat:message:embeds' || type === 'embeds') {
+					message.embeds = data.embeds;
 				} else if (type === 'chat:message:error') {
 					message.error = data.error;
 				} else if (type === 'chat:message:follow_ups') {
@@ -576,6 +579,7 @@ let reasoningEffort: string | null = 'medium';
 				showCallOverlay.set(false);
 				showOverview.set(false);
 				showArtifacts.set(false);
+				showEmbeds.set(false);
 			}
 		});
 
@@ -1708,7 +1712,9 @@ let reasoningEffort: string | null = 'medium';
 		const _files = JSON.parse(JSON.stringify(files));
 
 		chatFiles.push(
-			..._files.filter((item) => ['doc', 'text', 'file', 'collection'].includes(item.type))
+			..._files.filter((item) =>
+				['doc', 'text', 'file', 'note', 'chat', 'collection'].includes(item.type)
+			)
 		);
 		chatFiles = chatFiles.filter(
 			// Remove duplicates
@@ -2457,7 +2463,7 @@ const sendMessageSocket = async (model, _messages, _history, responseMessageId, 
 
 <svelte:head>
 	<title>
-		{$chatTitle
+		{$settings.showChatTitleInTab !== false && $chatTitle
 			? `${$chatTitle.length > 30 ? `${$chatTitle.slice(0, 30)}...` : $chatTitle} • ${$WEBUI_NAME}`
 			: `${$WEBUI_NAME}`}
 	</title>
