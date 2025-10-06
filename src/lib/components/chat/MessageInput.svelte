@@ -79,6 +79,8 @@
 
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
+	import Knobs from '../icons/Knobs.svelte';
+	import ValvesModal from '../workspace/common/ValvesModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -114,6 +116,10 @@ export let reasoningEffort: string | null = 'medium';
 	let inputVariablesModalCallback = (variableValues) => {};
 	let inputVariables = {};
 	let inputVariableValues = {};
+
+	let showValvesModal = false;
+	let selectedValvesType = 'tool'; // 'tool' or 'function'
+	let selectedValvesItemId = null;
 
 	$: onChange({
 		prompt,
@@ -908,8 +914,6 @@ $: if (reasoningEnabled) {
 				})
 			}
 		];
-
-		console.log(suggestions);
 		loaded = true;
 
 		window.setTimeout(() => {
@@ -959,6 +963,16 @@ $: if (reasoningEnabled) {
 	bind:show={showInputVariablesModal}
 	variables={inputVariables}
 	onSave={inputVariablesModalCallback}
+/>
+
+<ValvesModal
+	bind:show={showValvesModal}
+	userValves={true}
+	type={selectedValvesType}
+	id={selectedValvesItemId ?? null}
+	on:save={async () => {
+		await tick();
+	}}
 />
 
 {#if loaded}
@@ -1059,6 +1073,7 @@ $: if (reasoningEnabled) {
 							}}
 						>
 							<div
+								id="message-input-container"
 								class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
 									? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
 									: ' border-gray-100 dark:border-gray-850 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
@@ -1213,12 +1228,12 @@ $: if (reasoningEnabled) {
 														floatingMenuPlacement={'top-start'}
 														insertPromptAsRichText={$settings?.insertPromptAsRichText ?? false}
 														shiftEnter={!($settings?.ctrlEnterToSend ?? false) &&
-															(!$mobile ||
-																!(
-																	'ontouchstart' in window ||
-																	navigator.maxTouchPoints > 0 ||
-																	navigator.msMaxTouchPoints > 0
-																))}
+															!$mobile &&
+															!(
+																'ontouchstart' in window ||
+																navigator.maxTouchPoints > 0 ||
+																navigator.msMaxTouchPoints > 0
+															)}
 														placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 														largeTextAsFile={($settings?.largeTextAsFile ?? false) && !shiftKey}
 														autocomplete={$config?.features?.enable_autocomplete_generation &&
@@ -1444,6 +1459,9 @@ $: if (reasoningEnabled) {
 													console.error('OneDrive Error:', error);
 												}
 											}}
+											onUpload={async (e) => {
+												dispatch('upload', e);
+											}}
 											onClose={async () => {
 												await tick();
 
@@ -1452,6 +1470,7 @@ $: if (reasoningEnabled) {
 											}}
 										>
 											<div
+												id="input-menu-button"
 												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 											>
 												<PlusAlt className="size-5.5" />
@@ -1477,6 +1496,12 @@ $: if (reasoningEnabled) {
 												bind:reasoningEffort
 												bind:imageGenerationEnabled
 												bind:codeInterpreterEnabled
+												onShowValves={(e) => {
+													const { type, id } = e;
+													selectedValvesType = type;
+													selectedValvesItemId = id;
+													showValvesModal = true;
+												}}
 												onClose={async () => {
 													await tick();
 
@@ -1485,11 +1510,30 @@ $: if (reasoningEnabled) {
 												}}
 											>
 												<div
+													id="integration-menu-button"
 													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
 												>
 													<Component className="size-4.5" strokeWidth="1.5" />
 												</div>
 											</IntegrationsMenu>
+										{/if}
+
+										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
+											<div class="ml-1 flex gap-1.5">
+												<Tooltip content={$i18n.t('Valves')} placement="top">
+													<button
+														id="model-valves-button"
+														class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+														on:click={() => {
+															selectedValvesType = 'function';
+															selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
+															showValvesModal = true;
+														}}
+													>
+														<Knobs className="size-4" strokeWidth="1.5" />
+													</button>
+												</Tooltip>
+											</div>
 										{/if}
 
 										<div class="ml-1 flex gap-1.5">
@@ -1527,11 +1571,11 @@ $: if (reasoningEnabled) {
 																);
 															}}
 															type="button"
-															class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {selectedFilterIds.includes(
+															class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
 																filterId
 															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
-																: 'bg-transparent text-gray-600 dark:text-gray-300  '} capitalize"
+																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
+																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
 														>
 															{#if filter?.icon}
 																<div class="size-4 items-center flex justify-center">
@@ -1578,10 +1622,10 @@ $: if (reasoningEnabled) {
 													<button
 														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
 														type="button"
-														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {webSearchEnabled ||
+														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
 														($settings?.webSearch ?? false) === 'always'
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 '}"
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
 													>
 														<GlobeAlt className="size-4" strokeWidth="1.75" />
 														<div class="hidden group-hover:block">
@@ -1597,9 +1641,9 @@ $: if (reasoningEnabled) {
 														on:click|preventDefault={() =>
 															(imageGenerationEnabled = !imageGenerationEnabled)}
 														type="button"
-														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {imageGenerationEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 '}"
+														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
 													>
 														<Photo className="size-4" strokeWidth="1.75" />
 														<div class="hidden group-hover:block">
@@ -1619,9 +1663,9 @@ $: if (reasoningEnabled) {
 														on:click|preventDefault={() =>
 															(codeInterpreterEnabled = !codeInterpreterEnabled)}
 														type="button"
-														class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden hover:bg-gray-50 dark:hover:bg-gray-800 {codeInterpreterEnabled
-															? ' text-sky-500 dark:text-sky-300 bg-sky-50 dark:bg-sky-400/10 border border-sky-200/40 dark:border-sky-500/20'
-															: 'bg-transparent text-gray-600 dark:text-gray-300 '} {($settings?.highContrastMode ??
+														class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
+															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
+															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
 														false)
 															? 'm-1'
 															: 'focus:outline-hidden rounded-full'}"

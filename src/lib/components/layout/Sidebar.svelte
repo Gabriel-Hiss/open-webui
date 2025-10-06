@@ -80,7 +80,10 @@
 	let allChatsLoaded = false;
 
 	let showCreateFolderModal = false;
+
 	let folders = {};
+	let folderRegistry = {};
+
 	let newFolderId = null;
 
 	const initFolders = async () => {
@@ -88,7 +91,7 @@
 			toast.error(`${error}`);
 			return [];
 		});
-		_folders.set(folderList);
+		_folders.set(folderList.sort((a, b) => b.updated_at - a.updated_at));
 
 		folders = {};
 
@@ -175,14 +178,28 @@
 
 	const initChatList = async () => {
 		// Reset pagination variables
-		tags.set(await getAllTags(localStorage.token));
-		pinnedChats.set(await getPinnedChatList(localStorage.token));
-		initFolders();
-
+		console.log('initChatList');
 		currentChatPage.set(1);
 		allChatsLoaded = false;
 
-		await chats.set(await getChatList(localStorage.token, $currentChatPage));
+		initFolders();
+		await Promise.all([
+			await (async () => {
+				console.log('Init tags');
+				const _tags = await getAllTags(localStorage.token);
+				tags.set(_tags);
+			})(),
+			await (async () => {
+				console.log('Init pinned chats');
+				const _pinnedChats = await getPinnedChatList(localStorage.token);
+				pinnedChats.set(_pinnedChats);
+			})(),
+			await (async () => {
+				console.log('Init chat list');
+				const _chats = await getChatList(localStorage.token, $currentChatPage);
+				await chats.set(_chats);
+			})()
+		]);
 
 		// Enable pagination
 		scrollPaginationEnabled.set(true);
@@ -332,57 +349,52 @@
 		selectedChatId = null;
 	};
 
+	let unsubscribers = [];
 	onMount(async () => {
 		showPinnedChat = localStorage?.showPinnedChat ? localStorage.showPinnedChat === 'true' : true;
+		await showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
 
-		mobile.subscribe((value) => {
-			if ($showSidebar && value) {
-				showSidebar.set(false);
-			}
-
-			if ($showSidebar && !value) {
-				const navElement = document.getElementsByTagName('nav')[0];
-				if (navElement) {
-					navElement.style['-webkit-app-region'] = 'drag';
+		unsubscribers = [
+			mobile.subscribe((value) => {
+				if ($showSidebar && value) {
+					showSidebar.set(false);
 				}
-			}
 
-			if (!$showSidebar && !value) {
-				showSidebar.set(true);
-			}
-		});
-
-		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
-		showSidebar.subscribe(async (value) => {
-			localStorage.sidebar = value;
-
-			// nav element is not available on the first render
-			const navElement = document.getElementsByTagName('nav')[0];
-
-			if (navElement) {
-				if ($mobile) {
-					if (!value) {
+				if ($showSidebar && !value) {
+					const navElement = document.getElementsByTagName('nav')[0];
+					if (navElement) {
 						navElement.style['-webkit-app-region'] = 'drag';
-					} else {
-						navElement.style['-webkit-app-region'] = 'no-drag';
 					}
-				} else {
-					navElement.style['-webkit-app-region'] = 'drag';
 				}
-			}
 
-			if (!value) {
-				await initChannels();
-				await initChatList();
-			}
-		});
+				if (!$showSidebar && !value) {
+					showSidebar.set(true);
+				}
+			}),
+			showSidebar.subscribe(async (value) => {
+				localStorage.sidebar = value;
 
-		chats.subscribe((value) => {
-			initFolders();
-		});
+				// nav element is not available on the first render
+				const navElement = document.getElementsByTagName('nav')[0];
 
-		await initChannels();
-		await initChatList();
+				if (navElement) {
+					if ($mobile) {
+						if (!value) {
+							navElement.style['-webkit-app-region'] = 'drag';
+						} else {
+							navElement.style['-webkit-app-region'] = 'no-drag';
+						}
+					} else {
+						navElement.style['-webkit-app-region'] = 'drag';
+					}
+				}
+
+				if (value) {
+					await initChannels();
+					await initChatList();
+				}
+			})
+		];
 
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
@@ -401,6 +413,14 @@
 	});
 
 	onDestroy(() => {
+		if (unsubscribers && unsubscribers.length > 0) {
+			unsubscribers.forEach((unsubscriber) => {
+				if (unsubscriber) {
+					unsubscriber();
+				}
+			});
+		}
+
 		window.removeEventListener('keydown', onKeyDown);
 		window.removeEventListener('keyup', onKeyUp);
 
@@ -749,7 +769,7 @@
 				<div
 					class="{scrollTop > 0
 						? 'visible'
-						: 'invisible'} bg-linear-to-b from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mb-6"
+						: 'invisible'} sidebar-bg-gradient-to-b bg-linear-to-b from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mb-6"
 				></div>
 			</div>
 
@@ -785,6 +805,7 @@
 
 					<div class="px-[7px] flex justify-center text-gray-800 dark:text-gray-200">
 						<button
+							id="sidebar-search-button"
 							class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
 							on:click={() => {
 								showSearch.set(true);
@@ -805,6 +826,7 @@
 					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
 						<div class="px-[7px] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
+								id="sidebar-notes-button"
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 								href="/notes"
 								on:click={itemClickHandler}
@@ -825,6 +847,7 @@
 					{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
 						<div class="px-[7px] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
+								id="sidebar-workspace-button"
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 								href="/workspace"
 								on:click={itemClickHandler}
@@ -919,6 +942,7 @@
 						}}
 					>
 						<Folders
+							bind:folderRegistry
 							{folders}
 							{shiftKey}
 							onDelete={(folderId) => {
@@ -978,6 +1002,8 @@
 											return null;
 										}
 									);
+
+									folderRegistry[chat.folder_id]?.setFolderItems();
 								}
 
 								if (chat.pinned) {
@@ -1176,7 +1202,7 @@
 
 			<div class="px-1.5 pt-1.5 pb-2 sticky bottom-0 z-10 -mt-3 sidebar">
 				<div
-					class=" bg-linear-to-t from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mt-6"
+					class=" sidebar-bg-gradient-to-t bg-linear-to-t from-gray-50 dark:from-gray-950 to-transparent from-50% pointer-events-none absolute inset-0 -z-10 -mt-6"
 				></div>
 				<div class="flex flex-col font-primary">
 					{#if $user !== undefined && $user !== null}

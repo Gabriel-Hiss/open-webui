@@ -54,6 +54,7 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 	import RegenerateMenu from './ResponseMessage/RegenerateMenu.svelte';
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
+	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 
 interface MessageMetrics {
 	startedAt?: number;
@@ -660,8 +661,6 @@ interface MessageType {
 
 		await tick();
 		if (buttonsContainerElement) {
-			console.log(buttonsContainerElement);
-
 			buttonsContainerElement.addEventListener('wheel', function (event) {
 				if (buttonsContainerElement.scrollWidth <= buttonsContainerElement.clientWidth) {
 					// If the container is not scrollable, horizontal scroll
@@ -756,6 +755,22 @@ interface MessageType {
 												small={true}
 											/>
 										{/if}
+									</div>
+								{/each}
+							</div>
+						{/if}
+
+						{#if message?.embeds && message.embeds.length > 0}
+							<div class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap">
+								{#each message.embeds as embed, idx}
+									<div class="my-2 w-full" id={`${message.id}-embeds-${idx}`}>
+										<FullHeightIframe
+											src={embed}
+											allowScripts={true}
+											allowForms={true}
+											allowSameOrigin={true}
+											allowPopups={true}
+										/>
 									</div>
 								{/each}
 							</div>
@@ -879,6 +894,7 @@ interface MessageType {
 										bind:this={citationsElement}
 										id={message?.id}
 										sources={message?.sources ?? message?.citations}
+										{readOnly}
 									/>
 								{/if}
 

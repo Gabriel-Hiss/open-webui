@@ -149,10 +149,15 @@
 	export let onChange = (e) => {};
 
 	// create a lowlight instance with all languages loaded
-	const lowlight = createLowlight(hljs.listLanguages().reduce((obj, lang) => {
-		obj[lang] = () => hljs.getLanguage(lang);
-		return obj;
-	}, {} as Record<string, any>));
+	const lowlight = createLowlight(
+		hljs.listLanguages().reduce(
+			(obj, lang) => {
+				obj[lang] = () => hljs.getLanguage(lang);
+				return obj;
+			},
+			{} as Record<string, any>
+		)
+	);
 
 	export let editor: Editor | null = null;
 
@@ -163,7 +168,7 @@
 	export let documentId = '';
 
 	export let className = 'input-prose';
-	export let placeholder = 'Type here...';
+	export let placeholder = $i18n.t('Type here...');
 	let _placeholder = placeholder;
 
 	$: if (placeholder !== _placeholder) {
@@ -501,9 +506,14 @@
 
 	export const focus = () => {
 		if (editor) {
-			editor.view.focus();
-			// Scroll to the current selection
-			editor.view.dispatch(editor.view.state.tr.scrollIntoView());
+			try {
+				editor.view?.focus();
+				// Scroll to the current selection
+				editor.view?.dispatch(editor.view.state.tr.scrollIntoView());
+			} catch (e) {
+				// sometimes focusing throws an error, ignore
+				console.warn('Error focusing editor', e);
+			}
 		}
 	};
 
@@ -662,16 +672,10 @@
 			}
 		}
 
-		console.log('content', content);
-
 		if (collaboration && documentId && socket && user) {
 			const { SocketIOCollaborationProvider } = await import('./RichTextInput/Collaboration');
 			provider = new SocketIOCollaborationProvider(documentId, socket, user, content);
 		}
-
-		console.log(bubbleMenuElement, floatingMenuElement);
-		console.log(suggestions);
-
 		editor = new Editor({
 			element: element,
 			extensions: [
@@ -679,7 +683,7 @@
 					link: link
 				}),
 				...(dragHandle ? [ListItemDragHandle] : []),
-				Placeholder.configure({ placeholder: () => _placeholder }),
+				Placeholder.configure({ placeholder: () => _placeholder, showOnlyWhenEditable: false }),
 				SelectionDecoration,
 
 				...(richText
@@ -771,13 +775,29 @@
 
 				htmlValue = editor.getHTML();
 				jsonValue = editor.getJSON();
-				mdValue = turndownService
-					.turndown(
-						htmlValue
-							.replace(/<p><\/p>/g, '<br/>')
-							.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
-					)
-					.replace(/\u00a0/g, ' ');
+
+				if (richText) {
+					mdValue = turndownService
+						.turndown(
+							htmlValue
+								.replace(/<p><\/p>/g, '<br/>')
+								.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
+						)
+						.replace(/\u00a0/g, ' ');
+				} else {
+					mdValue = turndownService
+						.turndown(
+							htmlValue
+								// Replace empty paragraphs with line breaks
+								.replace(/<p><\/p>/g, '<br/>')
+								// Replace multiple spaces with non-breaking spaces
+								.replace(/ {2,}/g, (m) => m.replace(/ /g, '\u00a0'))
+								// Replace tabs with non-breaking spaces (preserve indentation)
+								.replace(/\t/g, '\u00a0\u00a0\u00a0\u00a0') // 1 tab = 4 spaces
+						)
+						// Convert non-breaking spaces back to regular spaces for markdown
+						.replace(/\u00a0/g, ' ');
+				}
 
 				onChange({
 					html: htmlValue,
@@ -1020,6 +1040,24 @@
 						// For all other cases, let ProseMirror perform its default paste behavior.
 						view.dispatch(view.state.tr.scrollIntoView());
 						return false;
+					},
+					copy: (view, event: ClipboardEvent) => {
+						if (!event.clipboardData) return false;
+						if (richText) return false; // Let ProseMirror handle normal copy in rich text mode
+
+						const { state } = view;
+						const { from, to } = state.selection;
+
+						// Only take the selected text & HTML, not the full doc
+						const plain = state.doc.textBetween(from, to, '\n');
+						const slice = state.doc.cut(from, to);
+						const html = editor.schema ? editor.getHTML(slice) : editor.getHTML(); // depending on your editor API
+
+						event.clipboardData.setData('text/plain', plain);
+						event.clipboardData.setData('text/html', html);
+
+						event.preventDefault();
+						return true;
 					}
 				}
 			},
@@ -1113,4 +1151,9 @@
 	</div>
 {/if}
 
-<div bind:this={element} class="relative w-full min-w-full h-full min-h-fit {className}" />
+<div
+	bind:this={element}
+	class="relative w-full min-w-full h-full min-h-fit {className} {!editable
+		? 'cursor-not-allowed'
+		: ''}"
+/>
