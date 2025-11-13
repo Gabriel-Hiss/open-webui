@@ -1674,6 +1674,7 @@ $: if (reasoningEnabled) {
 											</Tooltip>
 										{/if}
 									</div>
+									{/if}
 								</div>
 
 								<div class="self-end flex space-x-1 mr-1 shrink-0">
