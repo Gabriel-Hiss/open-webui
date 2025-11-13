@@ -85,7 +85,24 @@ def get_async_tool_function_and_apply_extra_params(
     update_wrapper(new_function, function)
     new_function.__signature__ = new_sig
 
+    new_function.__function__ = function  # type: ignore
+    new_function.__extra_params__ = extra_params  # type: ignore
+
     return new_function
+
+
+def get_updated_tool_function(function: Callable, extra_params: dict):
+    # Get the original function and merge updated params
+    __function__ = getattr(function, "__function__", None)
+    __extra_params__ = getattr(function, "__extra_params__", None)
+
+    if __function__ is not None and __extra_params__ is not None:
+        return get_async_tool_function_and_apply_extra_params(
+            __function__,
+            {**__extra_params__, **extra_params},
+        )
+
+    return function
 
 
 async def get_tools(
@@ -205,7 +222,6 @@ async def get_tools(
                         tools_dict[function_name] = tool_dict
 
                 else:
-                    log.warning(f"Unsupported tool server type: {type}")
                     continue
 
             else:
@@ -589,28 +605,20 @@ async def get_tool_server_data(token: str, url: str) -> Dict[str, Any]:
             error = str(err)
         raise Exception(error)
 
-    data = {
-        "openapi": res,
-        "info": res.get("info", {}),
-        "specs": convert_openapi_to_tool_payload(res),
-    }
-
-    log.info(f"Fetched data: {data}")
-    return data
+    log.debug(f"Fetched data: {res}")
+    return res
 
 
 async def get_tool_servers_data(servers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Prepare list of enabled servers along with their original index
+
+    tasks = []
     server_entries = []
     for idx, server in enumerate(servers):
         if (
             server.get("config", {}).get("enable")
             and server.get("type", "openapi") == "openapi"
         ):
-            # Path (to OpenAPI spec URL) can be either a full URL or a path to append to the base URL
-            openapi_path = server.get("path", "openapi.json")
-            full_url = get_tool_server_url(server.get("url"), openapi_path)
-
             info = server.get("info", {})
 
             auth_type = server.get("auth_type", "bearer")
@@ -626,12 +634,34 @@ async def get_tool_servers_data(servers: List[Dict[str, Any]]) -> List[Dict[str,
             if not id:
                 id = str(idx)
 
-            server_entries.append((id, idx, server, full_url, info, token))
+            server_url = server.get("url")
+            spec_type = server.get("spec_type", "url")
 
-    # Create async tasks to fetch data
-    tasks = [
-        get_tool_server_data(token, url) for (_, _, _, url, _, token) in server_entries
-    ]
+            # Create async tasks to fetch data
+            task = None
+            if spec_type == "url":
+                # Path (to OpenAPI spec URL) can be either a full URL or a path to append to the base URL
+                openapi_path = server.get("path", "openapi.json")
+                spec_url = get_tool_server_url(server_url, openapi_path)
+                # Fetch from URL
+                task = get_tool_server_data(token, spec_url)
+            elif spec_type == "json" and server.get("spec", ""):
+                # Use provided JSON spec
+                spec_json = None
+                try:
+                    spec_json = json.loads(server.get("spec", ""))
+                except Exception as e:
+                    log.error(f"Error parsing JSON spec for tool server {id}: {e}")
+
+                if spec_json:
+                    task = asyncio.sleep(
+                        0,
+                        result=spec_json,
+                    )
+
+            if task:
+                tasks.append(task)
+                server_entries.append((id, idx, server, server_url, info, token))
 
     # Execute tasks concurrently
     responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -643,8 +673,13 @@ async def get_tool_servers_data(servers: List[Dict[str, Any]]) -> List[Dict[str,
             log.error(f"Failed to connect to {url} OpenAPI tool server")
             continue
 
-        openapi_data = response.get("openapi", {})
+        response = {
+            "openapi": response,
+            "info": response.get("info", {}),
+            "specs": convert_openapi_to_tool_payload(response),
+        }
 
+        openapi_data = response.get("openapi", {})
         if info and isinstance(openapi_data, dict):
             openapi_data["info"] = openapi_data.get("info", {})
 
@@ -730,17 +765,13 @@ async def execute_tool_server(
         if operation.get("requestBody", {}).get("content"):
             if params:
                 body_params = params
-            else:
-                raise Exception(
-                    f"Request body expected for operation '{name}' but none found."
-                )
 
         async with aiohttp.ClientSession(
             trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
         ) as session:
             request_method = getattr(session, http_method.lower())
 
-            if http_method in ["post", "put", "patch"]:
+            if http_method in ["post", "put", "patch", "delete"]:
                 async with request_method(
                     final_url,
                     json=body_params,

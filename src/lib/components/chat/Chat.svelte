@@ -4,6 +4,7 @@
 	import { PaneGroup, Pane, PaneResizer } from 'paneforge';
 
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { fade } from 'svelte/transition';
 	const i18n: Writable<i18nType> = getContext('i18n');
 
 	import { goto } from '$app/navigation';
@@ -26,6 +27,7 @@
 		banners,
 		user,
 		socket,
+		audioQueue,
 		showControls,
 		showCallOverlay,
 		currentChatPage,
@@ -34,12 +36,15 @@
 		showOverview,
 		chatTitle,
 		showArtifacts,
+		artifactContents,
 		tools,
 		toolServers,
 		functions,
 		selectedFolder,
-		pinnedChats
+		pinnedChats,
+		showEmbeds
 	} from '$lib/stores';
+
 	import {
 		convertMessagesToHistory,
 		copyToClipboard,
@@ -47,8 +52,10 @@
 		createMessagesList,
 		getPromptVariables,
 		processDetails,
-		removeAllDetails
+		removeAllDetails,
+		getCodeBlockContents
 	} from '$lib/utils';
+	import { AudioQueue } from '$lib/utils/audio';
 
 	import {
 		createNewChat,
@@ -74,8 +81,8 @@
 	import { getTools } from '$lib/apis/tools';
 	import { uploadFile } from '$lib/apis/files';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
-
-	import { fade } from 'svelte/transition';
+	import { getFunctions } from '$lib/apis/functions';
+	import { updateFolderById } from '$lib/apis/folders';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -88,7 +95,6 @@
 	import Spinner from '../common/Spinner.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
-	import { getFunctions } from '$lib/apis/functions';
 	import Image from '../common/Image.svelte';
 
 	export let chatIdProp = '';
@@ -199,6 +205,8 @@ let reasoningEffort: string | null = 'medium';
 						reasoningEffort = input.reasoningEffort ?? null;
 					}
 				} catch (e) {}
+			} else {
+				await setDefaults();
 			}
 
 			const chatInput = document.getElementById('chat-input');
@@ -227,10 +235,15 @@ let reasoningEffort: string | null = 'medium';
 	}
 
 	const saveSessionSelectedModels = () => {
-		if (selectedModels.length === 0 || (selectedModels.length === 1 && selectedModels[0] === '')) {
+		const selectedModelsString = JSON.stringify(selectedModels);
+		if (
+			selectedModels.length === 0 ||
+			(selectedModels.length === 1 && selectedModels[0] === '') ||
+			sessionStorage.selectedModels === selectedModelsString
+		) {
 			return;
 		}
-		sessionStorage.selectedModels = JSON.stringify(selectedModels);
+		sessionStorage.selectedModels = selectedModelsString;
 		console.log('saveSessionSelectedModels', selectedModels, sessionStorage.selectedModels);
 	};
 
@@ -307,7 +320,7 @@ let reasoningEffort: string | null = 'medium';
 		}
 	};
 
-	const showMessage = async (message) => {
+	const showMessage = async (message, ignoreSettings = false) => {
 		await tick();
 
 		const _chatId = JSON.parse(JSON.stringify($chatId));
@@ -333,7 +346,7 @@ let reasoningEffort: string | null = 'medium';
 		await tick();
 		await tick();
 
-		if ($settings?.scrollOnBranchChange ?? true) {
+		if (($settings?.scrollOnBranchChange ?? true) || ignoreSettings) {
 			const messageElement = document.getElementById(`message-${message.id}`);
 			if (messageElement) {
 				messageElement.scrollIntoView({ behavior: 'smooth' });
@@ -376,6 +389,8 @@ let reasoningEffort: string | null = 'medium';
 					message.content = data.content;
 				} else if (type === 'chat:message:files' || type === 'files') {
 					message.files = data.files;
+				} else if (type === 'chat:message:embeds' || type === 'embeds') {
+					message.embeds = data.embeds;
 				} else if (type === 'chat:message:error') {
 					message.error = data.error;
 				} else if (type === 'chat:message:follow_ups') {
@@ -510,18 +525,50 @@ let reasoningEffort: string | null = 'medium';
 		}
 	};
 
+	const savedModelIds = async () => {
+		if (
+			$selectedFolder &&
+			selectedModels.filter((modelId) => modelId !== '').length > 0 &&
+			JSON.stringify($selectedFolder?.data?.model_ids) !== JSON.stringify(selectedModels)
+		) {
+			const res = await updateFolderById(localStorage.token, $selectedFolder.id, {
+				data: {
+					model_ids: selectedModels
+				}
+			});
+		}
+	};
+
+	$: if (selectedModels !== null) {
+		savedModelIds();
+	}
+
 	let pageSubscribe = null;
+	let showControlsSubscribe = null;
+	let selectedFolderSubscribe = null;
+
+	const stopAudio = () => {
+		try {
+			speechSynthesis.cancel();
+			$audioQueue.stop();
+		} catch {}
+	};
+
 	onMount(async () => {
 		loading = true;
 		console.log('mounted');
 		window.addEventListener('message', onMessageHandler);
-		$socket?.on('chat-events', chatEventHandler);
+		$socket?.on('events', chatEventHandler);
+
+		audioQueue.set(new AudioQueue(document.getElementById('audioElement')));
 
 		pageSubscribe = page.subscribe(async (p) => {
 			if (p.url.pathname === '/') {
 				await tick();
 				initNewChat();
 			}
+
+			stopAudio();
 		});
 
 		const storageChatInput = sessionStorage.getItem(
@@ -559,7 +606,7 @@ let reasoningEffort: string | null = 'medium';
 			} catch (e) {}
 		}
 
-		showControls.subscribe(async (value) => {
+		showControlsSubscribe = showControls.subscribe(async (value) => {
 			if (controlPane && !$mobile) {
 				try {
 					if (value) {
@@ -576,20 +623,37 @@ let reasoningEffort: string | null = 'medium';
 				showCallOverlay.set(false);
 				showOverview.set(false);
 				showArtifacts.set(false);
+				showEmbeds.set(false);
+			}
+		});
+
+		selectedFolderSubscribe = selectedFolder.subscribe(async (folder) => {
+			if (
+				folder?.data?.model_ids &&
+				JSON.stringify(selectedModels) !== JSON.stringify(folder.data.model_ids)
+			) {
+				selectedModels = folder.data.model_ids;
+
+				console.log('Set selectedModels from folder data:', selectedModels);
 			}
 		});
 
 		const chatInput = document.getElementById('chat-input');
 		chatInput?.focus();
-
-		chats.subscribe(() => {});
 	});
 
 	onDestroy(() => {
-		pageSubscribe();
-		chatIdUnsubscriber?.();
-		window.removeEventListener('message', onMessageHandler);
-		$socket?.off('chat-events', chatEventHandler);
+		try {
+			pageSubscribe();
+			showControlsSubscribe();
+			selectedFolderSubscribe();
+			chatIdUnsubscriber?.();
+			window.removeEventListener('message', onMessageHandler);
+			$socket?.off('events', chatEventHandler);
+			$audioQueue?.destroy();
+		} catch (e) {
+			console.error(e);
+		}
 	});
 
 	// File upload functions
@@ -785,11 +849,69 @@ let reasoningEffort: string | null = 'medium';
 		}
 	};
 
+	$: if (history) {
+		getContents();
+	} else {
+		artifactContents.set([]);
+	}
+
+	const getContents = () => {
+		const messages = history ? createMessagesList(history, history.currentId) : [];
+		let contents = [];
+		messages.forEach((message) => {
+			if (message?.role !== 'user' && message?.content) {
+				const {
+					codeBlocks: codeBlocks,
+					html: htmlContent,
+					css: cssContent,
+					js: jsContent
+				} = getCodeBlockContents(message.content);
+
+				if (htmlContent || cssContent || jsContent) {
+					const renderedContent = `
+                        <!DOCTYPE html>
+                        <html lang="en">
+                        <head>
+                            <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+							<${''}style>
+								body {
+									background-color: white; /* Ensure the iframe has a white background */
+								}
+
+								${cssContent}
+							</${''}style>
+                        </head>
+                        <body>
+                            ${htmlContent}
+
+							<${''}script>
+                            	${jsContent}
+							</${''}script>
+                        </body>
+                        </html>
+                    `;
+					contents = [...contents, { type: 'iframe', content: renderedContent }];
+				} else {
+					// Check for SVG content
+					for (const block of codeBlocks) {
+						if (block.lang === 'svg' || (block.lang === 'xml' && block.code.includes('<svg'))) {
+							contents = [...contents, { type: 'svg', content: block.code }];
+						}
+					}
+				}
+			}
+		});
+
+		artifactContents.set(contents);
+	};
+
 	//////////////////////////
 	// Web functions
 	//////////////////////////
 
 	const initNewChat = async () => {
+		console.log('initNewChat');
 		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
@@ -840,17 +962,22 @@ let reasoningEffort: string | null = 'medium';
 				$models.map((m) => m.id).includes(modelId)
 			);
 		} else {
-			if (sessionStorage.selectedModels) {
-				selectedModels = JSON.parse(sessionStorage.selectedModels);
-				sessionStorage.removeItem('selectedModels');
+			if ($selectedFolder?.data?.model_ids) {
+				selectedModels = $selectedFolder?.data?.model_ids;
 			} else {
-				if ($settings?.models) {
-					selectedModels = $settings?.models;
-				} else if ($config?.default_models) {
-					console.log($config?.default_models.split(',') ?? '');
-					selectedModels = $config?.default_models.split(',');
+				if (sessionStorage.selectedModels) {
+					selectedModels = JSON.parse(sessionStorage.selectedModels);
+					sessionStorage.removeItem('selectedModels');
+				} else {
+					if ($settings?.models) {
+						selectedModels = $settings?.models;
+					} else if ($config?.default_models) {
+						console.log($config?.default_models.split(',') ?? '');
+						selectedModels = $config?.default_models.split(',');
+					}
 				}
 			}
+
 			selectedModels = selectedModels.filter((modelId) => availableModels.includes(modelId));
 		}
 
@@ -1042,7 +1169,7 @@ let reasoningEffort: string | null = 'medium';
 			});
 		}
 	};
-	const chatCompletedHandler = async (chatId, modelId, responseMessageId, messages) => {
+	const chatCompletedHandler = async (_chatId, modelId, responseMessageId, messages) => {
 		const res = await chatCompleted(localStorage.token, {
 			model: modelId,
 			messages: messages.map((m) => ({
@@ -1056,7 +1183,7 @@ let reasoningEffort: string | null = 'medium';
 			})),
 			filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 			model_item: $models.find((m) => m.id === modelId),
-			chat_id: chatId,
+			chat_id: _chatId,
 			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
@@ -1084,9 +1211,9 @@ let reasoningEffort: string | null = 'medium';
 
 		await tick();
 
-		if ($chatId == chatId) {
+		if ($chatId == _chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
+				chat = await updateChatById(localStorage.token, _chatId, {
 					models: selectedModels,
 					messages: messages,
 					history: history,
@@ -1102,7 +1229,7 @@ let reasoningEffort: string | null = 'medium';
 		taskIds = null;
 	};
 
-	const chatActionHandler = async (chatId, actionId, modelId, responseMessageId, event = null) => {
+	const chatActionHandler = async (_chatId, actionId, modelId, responseMessageId, event = null) => {
 		const messages = createMessagesList(history, responseMessageId);
 
 		const res = await chatAction(localStorage.token, actionId, {
@@ -1117,7 +1244,7 @@ let reasoningEffort: string | null = 'medium';
 			})),
 			...(event ? { event: event } : {}),
 			model_item: $models.find((m) => m.id === modelId),
-			chat_id: chatId,
+			chat_id: _chatId,
 			session_id: $socket?.id,
 			id: responseMessageId
 		}).catch((error) => {
@@ -1139,9 +1266,9 @@ let reasoningEffort: string | null = 'medium';
 			}
 		}
 
-		if ($chatId == chatId) {
+		if ($chatId == _chatId) {
 			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, chatId, {
+				chat = await updateChatById(localStorage.token, _chatId, {
 					models: selectedModels,
 					messages: messages,
 					history: history,
@@ -1708,7 +1835,9 @@ let reasoningEffort: string | null = 'medium';
 		const _files = JSON.parse(JSON.stringify(files));
 
 		chatFiles.push(
-			..._files.filter((item) => ['doc', 'text', 'file', 'collection'].includes(item.type))
+			..._files.filter((item) =>
+				['doc', 'text', 'file', 'note', 'chat', 'folder', 'collection'].includes(item.type)
+			)
 		);
 		chatFiles = chatFiles.filter(
 			// Remove duplicates
@@ -2382,8 +2511,8 @@ const sendMessageSocket = async (model, _messages, _history, responseMessageId, 
 
 			selectedFolder.set(null);
 		} else {
-			_chatId = 'local';
-			await chatId.set('local');
+			_chatId = `local:${$socket?.id}`; // Use socket id for temporary chat
+			await chatId.set(_chatId);
 		}
 		await tick();
 
@@ -2457,13 +2586,13 @@ const sendMessageSocket = async (model, _messages, _history, responseMessageId, 
 
 <svelte:head>
 	<title>
-		{$chatTitle
+		{$settings.showChatTitleInTab !== false && $chatTitle
 			? `${$chatTitle.length > 30 ? `${$chatTitle.slice(0, 30)}...` : $chatTitle} • ${$WEBUI_NAME}`
 			: `${$WEBUI_NAME}`}
 	</title>
 </svelte:head>
 
-<audio id="audioElement" src="" style="display: none;" />
+<audio id="audioElement" src="" style="display: none;"></audio>
 
 <EventConfirmDialog
 	bind:show={showEventConfirmation}
@@ -2615,7 +2744,7 @@ const sendMessageSocket = async (model, _messages, _history, responseMessageId, 
 								</div>
 							</div>
 
-							<div class=" pb-2">
+							<div class=" pb-2 z-10">
 								<MessageInput
 									bind:this={messageInput}
 									{history}
@@ -2747,3 +2876,10 @@ const sendMessageSocket = async (model, _messages, _history, responseMessageId, 
 		</div>
 	{/if}
 </div>
+
+<style>
+	::-webkit-scrollbar {
+		height: 0.5rem;
+		width: 0.5rem;
+	}
+</style>
